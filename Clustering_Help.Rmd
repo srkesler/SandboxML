@@ -1,0 +1,101 @@
+### Clustering Overview
+
+Clustering is a machine learning algorithm that finds underlying patterns in data that are not readily apparent. Distinct underlying patterns form clusters that contain highly similar samples (i.e., minimal within-cluster variance). Clustering can help identify subgroups with unique characteristics.
+
+For example, many disease conditions are heterogeneous, meaning individuals vary widely in symptoms, outcomes, and treatment responses. Identifying subgroups can improve understanding of these variations and tailor interventions.
+
+Clustering is an unsupervised learning method because the outcome is unknown. In other words, there is no dependent variable. The algorithm determines the data organization rather than being explicitly trained, much like a student in an independent study.
+
+---
+
+### K-Means and K-Medoids Clustering
+
+These are common algorithms that divide the data into *k* clusters with high within-group similarity (minimal within-cluster variance). Key properties:
+
+- Each observation belongs to exactly one cluster (non-overlapping).
+- The general steps in the algorithm:
+  1. Randomly assign observations to initial clusters.
+  2. Compute cluster centroids:
+     - **K-means**: mean of all data points (per feature).
+     - **K-medoids**: the data point with the smallest average distance to others.
+  3. Reassign points to the closest centroid using a distance metric.
+  4. Repeat steps 2 and 3 until cluster assignments stabilize.
+
+---
+
+### Choosing an Algorithm and Distance Metric
+
+- Numeric, non-skewed/few outliers: k-means + Euclidean distance
+- Numeric, skewed/outliers: k-medoids + Manhattan distance
+- Mixed (numeric + categorical): k-medoids + Gower’s distance
+
+---
+
+### Reproducibility and Standardization
+
+Clustering Analysis:
+
+- Runs each algorithm **25 times** to ensure stable results.
+- Sets a fixed seed: `set.seed(42)` for reproducibility.
+- Offers the option to **standardize** numeric variables to to mean = 0 and SD = 1. This prevents bias when variable scales differ substantially.
+
+---
+
+### Determining the Number of Clusters
+
+You can specify `k` manually or use **silhouette width** to estimate the optimal number of clusters:
+
+- Silhouette width evaluates how well a point fits in its assigned cluster vs. others.
+- Higher average silhouette values (Si) indicate better clustering:
+  - **Si ≈ 0.7–1.0**: well-separated clusters
+  - **Si ≈ 0.5–0.7**: moderate separation
+  - **Si < 0.5**: poor separation
+
+---
+
+### Visualizing Cluster Quality
+
+#### Silhouette Plot
+- Each bar = a data point
+- Height = silhouette width (Si)
+- Red dashed line = average Si
+
+#### PCA Scatterplot
+- Reduces multidimensional clusters to 2D (first 2 principal components)
+- Points colored by cluster
+- Ellipses show 95% confidence region:
+  - Tight = low within-cluster variance
+  - Overlapping = poor separation
+
+💡 Tip: You can save a plot by right-clicking and choosing “Save Image As…”
+
+---
+
+### Interpreting Cluster Solutions
+
+Clusters are characterized by comparing variables of interest between them.
+- For example: Are clusters different in demographics, symptoms, outcomes?
+
+Saving clusters and cluster model:
+- At the bottom of the Plots tab, you can download:
+  - Original dataset with cluster assignments (.csv file)
+  - Cluster model (.RData file)
+
+---
+
+### Code Tab
+
+Basic code and logic will be displayed here reflecting your input selections.  You can copy and paste this code into an R script and run it after minor edits to learn more about how code-based data analysis works.
+
+---
+
+### Example Methods Description
+
+<span style="font-size: 95%;"> We implemented a k-medoids clustering algorithm with Manhattan distance given the presence of multiple outliers in the data.  Data were z-score normalized to prevent bias related to differences in value magnitudes and ranges.  The optimal number of clusters (k) was determined using the silhouette statistic which suggested k = 2.  K-medoids was conducted in the R Statistical Package (v.x.x) 25 different times, all with different random initial configurations to ensure cluster stability.  The cluster solution was evaluated using silhouette and PCA plots, and the average silhouette width across clusters.</span>
+
+---
+
+### References
+
+- Gareth et al. *An Introduction to Statistical Learning with Applications in R*, 2017. Springer.
+- Giordani et al. *An Introduction to Clustering with R*, 2020. Springer.

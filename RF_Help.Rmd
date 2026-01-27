@@ -1,0 +1,111 @@
+### Overview of Random Forest Modeling
+
+Random Forest (RF) is an ensemble machine learning method that builds a collection of decision trees (a "forest") and combines their results to improve accuracy and robustness. Each tree has a slightly different "perspective" because it uses a random subset of the data.  Decision splits within a tree are also based on a random selection of features.  RF can be used for both **classification** (categorical outcome) and **regression** (numeric outcome) tasks.
+
+---
+
+❗ Important: 
+- Files must contain only the variables needed for modeling (features + outcome) and should have no missing data.
+- If the outcome variable is binary, it must be coded 1/0 with 1 = positive class (e.g., control cases) and 0 = negative class (e.g., patient cases).
+- Multiclass modeling is not currently supported
+
+---
+
+💡 Tip: Basic descriptive statistics are shown for the selected variable in the Data tab.
+
+--- 
+
+### Random Forest Analysis
+
+- Sets a random seed for reproducibility `set.seed(42)`
+- Randomizes rows (cases) prior to conducting RF modeling (`sample()`).
+- Designates binary categorical outcome variables `as.factor`.
+- Offers the option to **standardize** numeric variables to to mean = 0 and SD = 1 (`scale()`). 
+  - This prevents bias when variable scales differ substantially. 
+  - The outcome variable is not standardized.
+
+---
+
+### Key Parameters
+
+- **mtry** (`mtry`): Number of variables randomly selected at each decision split.
+- **number of trees** (`ntree`): Number of decision trees in the forest.
+- **Tree depth** (`maxnodes`): Maximum depth of individual trees (how many questions a tree can ask)
+- **Auto**: `mtry` = sqrt(no. features) for all datasets
+  - For N<1000: `ntrees` = 100 and `maxnodes` = maximum 
+  - For N>1000: `ntrees` = 500 and `maxnodes` = 10
+- 💡 Tip: Max tree depth is designated as `maxnodes <- "Null"` in the code meaning no depth limit is set.
+---
+
+### Cross-Validation (CV) Options
+
+- **None**: uses entire dataset for training without validation.
+- **K-folds**: splits data into k folds; each fold is used for testing once.
+- **LOOCV**: Leave-One-Out CV (1 sample per test fold).
+
+---
+
+### Class Balancing Methods
+
+- **None**: uses original class distribution.
+- **Upsample**: randomly replicates minority class (with replacement) up to double the minority class size.
+- **Downsample**: randomly reduces majority class to match minority class.
+- 💡 Tip: Class balancing does not work reliably with LOOCV - use k-folds CV instead.
+---
+
+### Interpretation of Results
+
+#### For Classification:
+
+- **Confusion Matrix**: Summarizes correct vs. incorrect classifications. Correct predictions are shown on the diagonal and incorrect predictions on the off-diagonal.
+- **AUC (Area Under Curve)**: Measures overall classifier performance (0.5 = chance, 1.0 = perfect).
+- **F1 Score**: Also known as F-measure.  Combines precision and recall.
+- **Sensitivity (Recall)**: True positive rate.
+- **Specificity**: True negative rate.
+- **ROC Plot**: Visualization of the balance between sensitivity and specificity
+
+#### For Regression:
+
+- **R squared**: Proportion of variance explained.
+- **Adj. R squared**: Proportion of variance explained adjusted for the number of features.
+- **Actual vs Predicted Plot**: Visualization of model fit.
+
+---
+
+💡 Tips 
+  - F1 Score may not be computed in certain  situations such as:
+    - LOOCV
+    - Using a high k value in k-folds CV with small samples.
+    - Datasets with severe class imbalance
+    - Models where sensitivity (recall) = is zero or near zero. 
+  - You must Run Random Forest again after changing any options or parameters.
+  - You can save a plot by right-clicking and choosing “Save Image As…”
+  - Selecting “Save trained model” will save the RF model (`save(rf_model.RData, file = "/path_to_file"`)
+---
+
+### Prediction
+
+- In this tab, you can load a previously saved RF model and apply it to new data to predict the outcome for new cases: `predict(rf_model, new_data)`.
+- The variable names in the new data must match exactly those in the model data.
+- The data types must be compatible (e.g., numeric vs. categorical).
+- Do **not** include the outcome variable in the new data.
+- Do **not** preprocess the new data - the `predict()` function will automatically apply any preprocessing used for the model to the new data.
+
+---
+
+### Code Tab
+
+Basic code and logic will be displayed here reflecting your input selections.  You can copy and paste this code into an R script and run it after minor edits to learn more about how code-based data analysis works.
+
+---
+
+### Example Methods Description
+
+<span style="font-size: 95%;"> We conducted a random forest classification analysis using the R Statistical Package (v.x.x) using standard parameters (mtry = 4, number of trees = 500, tree depth = 10) and a 10-folds cross-validation strategy.  Because of class imbalance, we first conducted random minority class upsampling. Features were standardized (mean = 0, standard deviation = 1) and cases were randomized prior to modeling. Model performance metrics represented the mean values across cross-validation folds.</span>
+
+---
+
+### References
+
+- Breiman L. *Random forests*. Machine Learning. 2001;45(1):5-32.
+- Gareth et al. *An Introduction to Statistical Learning with Applications in R*, 2017. Springer.

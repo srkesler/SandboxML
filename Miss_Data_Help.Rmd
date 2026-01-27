@@ -1,0 +1,79 @@
+### Overview of Missing Data
+
+Missing data analysis is critical in machine learning because incomplete data can lead to biased models and unreliable predictions. Machine learning algorithms typically assume complete inputs, so missing values, if unaddressed, can distort patterns, affect feature distributions, and impair generalizability. Proper analysis helps determine the mechanism of missingness (MCAR, MAR, MNAR), guiding appropriate strategies such as imputation, model-based approaches, or data exclusion. Moreover, robust handling of missing data enhances model interpretability and validity.
+
+---
+
+### Missing Data Types
+
+- **MCAR:** Missing Completely at Random - missingness is not related to observed or unobserved variables.
+- **MAR:** Missing at Random - missingness is related to one or more observed variables.
+- **MNAR:** Missing Not at Random - missingness is related to one or more unobserved variables.
+
+---
+
+### Determining Missing Data Type
+
+- **Visualization:** Plotting missing data patterns. 
+  - Variable plot (`gg_miss_var(df)`): shows the frequency of missing data for each variable.
+  - Upset plot (`gg_miss_upset(df)`): reveals any relationships between patterns of missingness that suggest MAR data.
+  - FCT plot (`gg_miss_fct(x = df, fct = groupVar)`): shows patterns of missingness stratified by a certain grouping variable.
+- **Little's MCAR Test:** uses a Chi Square test to determine if missingness is systematically related to other variables.  A significant test indicates that missingness is systemically related to other variables and therefore, the data are **not** MCAR.
+    - 💡 Tip: Little's MCAR test is primarily used for numeric data.
+
+---
+
+### Missing Data Strategies
+
+The recommended approach for handling missing data will depend on the missing data type, the goals of the study, and the available computational resources, among other considerations. 
+
+The Missing Data Analysis module provides the following options:
+
+- **Listwise deletion:** remove cases with missing data. This strategy is most often used for MCAR data.
+- **Single stat imputation:** replace numeric values with the mean, binary values with the mode, and ordinal values with the median. This is another strategy that is commonly used for MCAR data.
+- **Random forest imputation:** (`missRanger()`). Implements random forest modeling to predict missing values from non-missing data. Unlike classic multiple imputation, random forest imputation results in a single imputed dataset. When Random Forest Imputation is selected, the data are first z-score normalized (`scale(df)`). This strategy is often best for MAR data.
+
+For MCAR data, sensitivity analysis is typically recommended.  This typically involves comparing results across multiple missing data scenarios. For example, analyzing the impact of including versus excluding cases with missing values, or comparing characteristics of cases with and without missing data. However, formal sensitivity analysis tools are not currently implemented in the Missing Data Analysis module.
+
+---
+
+### Missing Data Analysis Module Usage
+
+- Select your dataset. The data should be cleaned (errors removed, variable names corrected, binary variables code 1/0, etc.).
+- Select a binary grouping variable for the FCT plot.
+- Click Plot Missing Data.
+- The results will be output to the Plot Missing Data tab.
+  - Variable, upset, and FCT plots.  
+    - You can change the variable for the FCT plot and it will update in real-time.
+  - Little's MCAR test, if appropriate.
+- Select a missing data imputation strategy.
+- Select a threshold for excluding variables with high missingness (none, 5%, 10%, 20%).
+- Click Impute Missing Data.
+- The results will be output to the Plot Imputed Data tab.
+  - A list of variables excluded due to high missingness based on your selected threshold.
+  - Imputed vs. Observed plots for any variables that had missing data.  Imputed values should be within the same range as observed values.
+  - Download imputed dataset.
+- ❗ Binary categorical variables are automatically designated `as.factor()` by the module prior to any analyses.
+---
+
+💡 Tip: You can save a plot by right-clicking and choosing “Save Image As…”
+
+---
+
+### Code Tab
+
+Basic code and logic will be displayed here reflecting your input selections.  You can copy and paste this code into an R script and run it after minor edits to learn more about how code-based data analysis works.
+
+---
+
+### Example Methods Description
+
+<span style="font-size: 95%;"> We excluded any variables that had more than 10% missingness.  Visualizations of missingness patterns indicated that data were Missing at Random (MAR).  Therefore, data were first z-score normalized, and missing data were imputed using random forest imputation. This method approximates multiple imputation because each decision tree represents a slightly different model, and the final imputed value is obtained by averaging the predictions across the decision trees, similar to the pooling process used in classic multiple imputation. </span>
+
+---
+
+### References ###
+
+- Little RJA. A Test of Missing Completely at Random for Multivariate Data with Missing Values. Journal of the American Statistical Association. 1988;83(404):1198-202.
+- Stekhoven DJ, Buhlmann P. MissForest--non-parametric missing value imputation for mixed-type data. Bioinformatics. 2012;28(1):112-8.
+  - 💡 `missRanger()` is a faster version of `missForest()`.
