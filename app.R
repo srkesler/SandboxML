@@ -1,6 +1,8 @@
 # Master Shiny ML App
 # Shelli Kesler 4/22/25
 
+options(shiny.maxRequestSize = 500 * 1024^2)  # 500 MB
+
 library(factoextra)
 library(shiny)
 library(cluster)
