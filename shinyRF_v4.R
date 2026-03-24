@@ -322,6 +322,9 @@ rf_server <- function(input, output, session) {
           
           cat("R squared:", round(rf_model$results$Rsquared, 3), "\n")
           cat("Adjusted R squared:", round(adj_r2, 3), "\n")
+          cat("MAE:", round(rf_model$results$MAE, 3), "\n")
+          cat("RMSE:", round(rf_model$results$RMSE,3), "\n")
+          
         }
       }
       
