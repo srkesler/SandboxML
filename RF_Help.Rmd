@@ -68,6 +68,8 @@ Random Forest (RF) is an ensemble machine learning method that builds a collecti
 
 - **R squared**: Proportion of variance explained.
 - **Adj. R squared**: Proportion of variance explained adjusted for the number of features.
+- **MAE**: the average absolute difference between predicted values and actual values in a dataset.
+- **RMSE**: same as MAE but with a penalty for larger errors.
 - **Actual vs Predicted Plot**: Visualization of model fit.
 
 ---
