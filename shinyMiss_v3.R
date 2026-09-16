@@ -181,19 +181,19 @@ miss_server <- function(input, output, session) {
         # Numeric, not ordered
         if (is.numeric(df[[col]]) && !is.ordered(df[[col]])) {
           df_imputed[[col]][is.na(df[[col]])] <- mean(df[[col]], na.rm = TRUE)
-          
-          # Binary factor
-        } else if (is.factor(df[[col]]) && nlevels(df[[col]]) == 2) {
-          mode_val <- names(which.max(table(df[[col]])))
-          df_imputed[[col]][is.na(df[[col]])] <- mode_val
-          df_imputed[[col]] <- droplevels(df_imputed[[col]])
-          
+
           # Ordered factor (ordinal)
         } else if (is.ordered(df[[col]])) {
           ord_vals <- as.integer(df[[col]])
           med_val <- median(ord_vals, na.rm = TRUE)
           levels_ord <- levels(df[[col]])
           df_imputed[[col]][is.na(df[[col]])] <- levels_ord[round(med_val)]
+
+          # Unordered categorical (binary or nominal factor/character)
+        } else if (is.factor(df[[col]]) || is.character(df[[col]])) {
+          mode_val <- names(which.max(table(df[[col]])))
+          df_imputed[[col]][is.na(df[[col]])] <- mode_val
+          if (is.factor(df_imputed[[col]])) df_imputed[[col]] <- droplevels(df_imputed[[col]])
         }
       }
     }
@@ -393,15 +393,15 @@ miss_server <- function(input, output, session) {
                   "    if (any(is.na(df[[col]]))) {",
                   "      if (is.numeric(df[[col]]) && !is.ordered(df[[col]])) {",
                   "        df_imputed[[col]][is.na(df[[col]])] <- mean(df[[col]], na.rm = TRUE)",
-                  "      } else if (is.factor(df[[col]]) && nlevels(df[[col]]) == 2) {",
-                  "        mode_val <- names(which.max(table(df[[col]])))",
-                  "        df_imputed[[col]][is.na(df[[col]])] <- mode_val",
-                  "        df_imputed[[col]] <- droplevels(df_imputed[[col]])",
                   "      } else if (is.ordered(df[[col]])) {",
                   "        ord_vals <- as.integer(df[[col]])",
                   "        med_val <- median(ord_vals, na.rm = TRUE)",
                   "        levels_ord <- levels(df[[col]])",
                   "        df_imputed[[col]][is.na(df[[col]])] <- levels_ord[round(med_val)]",
+                  "      } else if (is.factor(df[[col]]) || is.character(df[[col]])) {",
+                  "        mode_val <- names(which.max(table(df[[col]])))",
+                  "        df_imputed[[col]][is.na(df[[col]])] <- mode_val",
+                  "        if (is.factor(df_imputed[[col]])) df_imputed[[col]] <- droplevels(df_imputed[[col]])",
                   "      }",
                   "    }",
                   "  }",

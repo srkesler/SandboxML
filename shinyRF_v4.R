@@ -198,7 +198,7 @@ rf_server <- function(input, output, session) {
 
     if (input$param_mode == "Auto") {
       p <- ncol(df) - 1
-      mtry <- round(sqrt(p))
+      mtry <- if (input$rf_type == "Classification") round(sqrt(p)) else round(p / 3)
       ntree <- if (nrow(df) < 1000) 100 else 500
       maxnodes <- if (nrow(df) < 1000) NULL else 10
     } else {
@@ -206,15 +206,16 @@ rf_server <- function(input, output, session) {
       ntree <- input$rf_ntree
       maxnodes <- if (input$rf_maxnodes == "NULL") NULL else as.numeric(input$rf_maxnodes)
     }
-    
+
     incProgress(0.3)
-    
+
+    use_class_probs <- input$rf_type == "Classification"
     ctrl <- if (input$cv_method == "None") {
-      trainControl(method = "none", classProbs = TRUE, savePredictions = TRUE)
+      trainControl(method = "none", classProbs = use_class_probs, savePredictions = TRUE)
     } else if (input$cv_method == "LOOCV") {
-      trainControl(method = "LOOCV", classProbs = TRUE, savePredictions = TRUE)
+      trainControl(method = "LOOCV", classProbs = use_class_probs, savePredictions = TRUE)
     } else {
-      trainControl(method = "cv", number = input$k_folds, classProbs = TRUE, savePredictions = TRUE)
+      trainControl(method = "cv", number = input$k_folds, classProbs = use_class_probs, savePredictions = TRUE)
     }
 
     rf_model <- train(
@@ -393,7 +394,17 @@ observeEvent(input$rf_predict_btn, {
   # Load model and new data
   load(input$rf_model_file$datapath)  # loads rf_model
   new_data <- read_csv(input$rf_newdata$datapath,show_col_types = FALSE)
-  
+
+  # CSV files don't preserve factor types, so realign predictor types/levels
+  # with what the model was trained on before predicting
+  train_df <- rf_model$trainingData
+  predictor_cols <- setdiff(names(train_df), ".outcome")
+  for (col in predictor_cols) {
+    if (col %in% names(new_data) && (is.factor(train_df[[col]]) || is.character(train_df[[col]]))) {
+      new_data[[col]] <- factor(new_data[[col]], levels = sort(unique(as.character(train_df[[col]]))))
+    }
+  }
+
   # Get outcome type from model object
   is_classification <- rf_model$modelType == "Classification"
   
@@ -427,8 +438,8 @@ observeEvent(input$rf_predict_btn, {
   })
 
   output$rf_codeOutput <- renderText({
-    req(input$rf_type, input$param_mode, input$cv_method)
-    
+    req(input$rf_type, input$param_mode, input$cv_method, input$rf_outcome)
+
     code <- c(
       "set.seed(42)  # for reproducibility",
       "",
@@ -437,46 +448,56 @@ observeEvent(input$rf_predict_btn, {
       "library(pROC)",
       "",
       "df <- read.csv(\"path_to_your_file.csv\")",
+      sprintf("outcome <- \"%s\"", input$rf_outcome),
       ""
     )
-    
+
     if (input$rf_type == "Classification") {
       code <- c(code,
-                "df$outcome <- as.factor(df$outcome)  # convert to factor",
+                "df[[outcome]] <- as.factor(df[[outcome]])  # convert to factor",
+                "",
+                "# caret requires valid R variable names as factor levels for classProbs",
+                "if (all(levels(df[[outcome]]) %in% c(\"0\", \"1\"))) {",
+                "  levels(df[[outcome]]) <- c(\"Class0\", \"Class1\")",
+                "}",
                 "")
     }
-    
+
     if (input$rf_scale_data) {
       code <- c(code,
                 "# Standardize numeric predictors (excluding outcome)",
-                "numeric_vars <- sapply(df[, -which(names(df) == \"outcome\")], is.numeric)",
+                "predictor_cols <- setdiff(names(df), outcome)",
+                "numeric_vars <- predictor_cols[sapply(df[, predictor_cols], is.numeric)]",
                 "df[, numeric_vars] <- scale(df[, numeric_vars])",
                 "")
     }
-    
+
     if (input$class_balance == "Upsample") {
       code <- c(code,
                 "# Controlled upsampling of the minority class",
-                "minority_rows <- df[df$outcome == 'minority', ]",
-                "upsampled <- minority_rows[sample(nrow(minority_rows), nrow(minority_rows), replace = TRUE), ]",
-                "df <- rbind(df, upsampled, df[df$outcome != 'minority', ])",
+                "class_table <- table(df[[outcome]])",
+                "minority_class <- names(which.min(class_table))",
+                "minority_rows <- df[df[[outcome]] == minority_class, ]",
+                "majority_rows <- df[df[[outcome]] != minority_class, ]",
+                "upsampled_minority <- minority_rows[sample(nrow(minority_rows), nrow(minority_rows), replace = TRUE), ]",
+                "df <- rbind(minority_rows, upsampled_minority, majority_rows)",
                 "")
     } else if (input$class_balance == "Downsample") {
       code <- c(code,
                 "# Downsampling the majority class",
-                "df <- downSample(x = df[, -which(names(df) == \"outcome\")],",
-                "                 y = df$outcome, yname = \"outcome\")",
+                "df <- downSample(x = df[, setdiff(names(df), outcome)],",
+                "                 y = df[[outcome]], yname = outcome)",
                 "")
     }
-    
+
     code <- c(code,
               "# Randomize the data",
               "df <- df[sample(nrow(df)), ]",
               "")
-    
+
     code <- c(code,
               "# Define model formula",
-              "form <- outcome ~ .",
+              "form <- as.formula(paste(outcome, \"~ .\"))",
               "")
     
     if (input$cv_method == "None") {
@@ -487,24 +508,34 @@ observeEvent(input$rf_predict_btn, {
       cv <- paste0("cv (k = ", input$k_folds, ")")
     }
     
+    class_probs <- if (input$rf_type == "Classification") "TRUE" else "FALSE"
+    cv_method_arg <- ifelse(input$cv_method == "K-folds", "cv",
+                             ifelse(input$cv_method == "LOOCV", "LOOCV", "none"))
+
+    ctrl_line <- if (input$cv_method == "K-folds") {
+      sprintf("ctrl <- trainControl(method = \"%s\", number = %s, classProbs = %s, savePredictions = TRUE)",
+              cv_method_arg, input$k_folds, class_probs)
+    } else {
+      sprintf("ctrl <- trainControl(method = \"%s\", classProbs = %s, savePredictions = TRUE)",
+              cv_method_arg, class_probs)
+    }
+
     code <- c(code,
               sprintf("# Set up cross-validation (%s)", cv),
-              sprintf("ctrl <- trainControl(method = \"%s\", classProbs = TRUE, savePredictions = TRUE)",
-                      ifelse(input$cv_method == "K-folds", "cv",
-                             ifelse(input$cv_method == "LOOCV", "LOOCV", "none"))),
+              ctrl_line,
               "")
-    
+
     if (input$param_mode == "Manual") {
       code <- c(code,
                 "# Manual hyperparameters",
                 sprintf("mtry <- %s", input$rf_mtry),
                 sprintf("ntree <- %s", input$rf_ntree),
-                sprintf("maxnodes <- %s", ifelse(is.null(input$rf_maxnodes), "NULL", input$rf_maxnodes)),
+                sprintf("maxnodes <- %s", ifelse(input$rf_maxnodes == "NULL", "NULL", input$rf_maxnodes)),
                 "")
     } else {
       code <- c(code,
                 "# Auto hyperparameters",
-                "p <- number_of_predictors",
+                "p <- ncol(df) - 1",
                 if (input$rf_type == "Classification") {
                   "mtry <- round(sqrt(p))"
                 } else {
@@ -523,9 +554,19 @@ observeEvent(input$rf_predict_btn, {
               "               tuneGrid = data.frame(mtry = mtry),",
               "               ntree = ntree, maxnodes = maxnodes)",
               "",
-              "# Model Performance (Simplified)",
-              if (input$rf_type == "Classification"){
-                "confusionMatrix(model)"
+              "# Model Performance",
+              if (input$rf_type == "Classification") {
+                if (input$cv_method == "None") {
+                  c("preds <- predict(model, newdata = model$trainingData)",
+                    "obs <- model$trainingData$.outcome",
+                    "confusionMatrix(preds, obs)")
+                } else {
+                  # confusionMatrix(model) does not support LOOCV/none resampling,
+                  # so use the stored out-of-fold predictions directly
+                  c("preds <- model$pred$pred",
+                    "obs <- model$pred$obs",
+                    "confusionMatrix(preds, obs)")
+                }
               }
               else{
                 "print(model)"

@@ -288,6 +288,23 @@ make_clust_app <- function() {
         code_lines <- c(code_lines, "df <- df_raw", "")
       }
 
+      # Distance matrix must be computed before k-selection for PAM methods
+      if (method == "K-medoids (Manhattan)") {
+        code_lines <- c(
+          code_lines,
+          "# manhattan distance for PAM",
+          "dist_mat <- dist(df, method = 'manhattan')",
+          ""
+        )
+      } else if (method == "K-medoids (Gower)") {
+        code_lines <- c(
+          code_lines,
+          "# gower distance for PAM",
+          "dist_mat <- daisy(df, metric = 'gower')",
+          ""
+        )
+      }
+
       if (k_mode == "Auto") {
         if (method == "K-means (Euclidean)") {
           code_lines <- c(
@@ -306,7 +323,6 @@ make_clust_app <- function() {
             code_lines,
             "# determine optimal number of clusters using PAM",
             "sil_width <- rep(NA, 10)",
-            "# define dist_mat based on your chosen metric, then:",
             "for (i in 2:10) {",
             "  fit <- pam(dist_mat, k = i, diss = TRUE)",
             "  sil_width[i] <- fit$silinfo$avg.width",
@@ -323,23 +339,18 @@ make_clust_app <- function() {
           code_lines,
           "",
           "# k-means clustering",
-          "clust_model <- kmeans(df, centers = k, nstart = 25)"
-        )
-      } else if (method == "K-medoids (Manhattan)") {
-        code_lines <- c(
-          code_lines,
-          "",
-          "# manhattan distance for PAM",
-          "dist_mat <- dist(df, method = 'manhattan')",
-          "clust_model <- pam(dist_mat, k = k, diss = TRUE, medoids = 'random', nstart = 25)"
+          "clust_model <- kmeans(df, centers = k, nstart = 25)",
+          "clusters <- clust_model$cluster",
+          "sil <- silhouette(clusters, dist(df))"
         )
       } else {
         code_lines <- c(
           code_lines,
           "",
-          "# gower distance for PAM",
-          "dist_mat <- daisy(df, metric = 'gower')",
-          "clust_model <- pam(dist_mat, k = k, diss = TRUE, medoids = 'random', nstart = 25)"
+          "# PAM clustering",
+          "clust_model <- pam(dist_mat, k = k, diss = TRUE, medoids = 'random', nstart = 25)",
+          "clusters <- clust_model$clustering",
+          "sil <- silhouette(clusters, dist_mat)"
         )
       }
 
@@ -347,12 +358,11 @@ make_clust_app <- function() {
         code_lines,
         "",
         "# Plot Cluster Result",
-        "sil <- silhouette(clust_model$cluster, dist(df))",
         "fviz_silhouette(sil)",
         "",
         "# Save data with clusters",
         "df_out <- df_raw",
-        "df_out$cluster <- clust_model$cluster",
+        "df_out$cluster <- clusters",
         "write.csv(df_out, file = 'clustered_data.csv', row.names = FALSE)"
       )
 
