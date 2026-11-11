@@ -84,9 +84,7 @@ miss_server <- function(input, output, session) {
     read_csv(input$miss_datafile$datapath,show_col_types = FALSE)
   })
   
-  # Result of the most recent imputation. Everything in the Imputed Data tab is
-  # drawn from this object, so it always describes the imputation that was
-  # actually run, even if the sidebar options are changed afterwards.
+  # Result of the most recent imputation. 
   imp_result <- reactiveVal(NULL)
 
   output$miss_dataView <- DT::renderDataTable({
@@ -152,9 +150,7 @@ miss_server <- function(input, output, session) {
   })
  
   
-  # Whole-number variables with few distinct values (e.g., Likert items) are
-  # treated as ordinal. A CSV file cannot mark a variable as ordinal, so this
-  # rule is how ordinal variables are recognized.
+  # Whole-number variables with few distinct values are treated as ordinal. 
   is_ordinal_like <- function(x) {
     obs <- x[!is.na(x)]
     is.numeric(x) && length(obs) > 0 && all(obs == round(obs)) && length(unique(obs)) <= 10
@@ -202,7 +198,7 @@ miss_server <- function(input, output, session) {
       
       # Construct value vector
       value <- df[[var]]
-      value[miss_idx] <- df_imputed[[var]][miss_idx]  # safely replace missing rows only
+      value[miss_idx] <- df_imputed[[var]][miss_idx]  # replace missing rows only
       
       # Create combined plot data
       df_plot <- data.frame(

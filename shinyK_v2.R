@@ -90,8 +90,6 @@ make_clust_app <- function() {
   # Server
   clust_server <- function(input, output, session) {
 
-    # All columns are read here. Which ones are used depends on the method:
-    # k-means and Manhattan k-medoids need numeric data, whereas Gower distance
     # handles numeric and categorical variables together.
     clust_data <- shiny::reactive({
       shiny::req(input$clust_datafile)
@@ -163,9 +161,7 @@ make_clust_app <- function() {
 
         shiny::incProgress(0.3)
 
-        # Determine optimal k if selected. Each candidate k is fitted exactly as
-        # the final model is (same number of random starts), so the silhouette
-        # used to choose k describes the kind of solution that is reported.
+        # Determine optimal k if selected.
         if (k_mode == "Auto") {
           # k cannot exceed the number of distinct rows minus 1
           k_max <- min(10, nrow(unique(df)) - 1)
@@ -213,13 +209,10 @@ make_clust_app <- function() {
         mean_sil <- mean(sil[, 3])
 
         # Visualization
-        # Numeric data: PCA of the data exactly as they were clustered (centered,
-        # and standardized only if that option was selected; stand = FALSE stops
-        # fviz_cluster from standardizing a second time).
-        # Data with categorical variables (Gower): PCA cannot be used, so the
+        # Numeric data: PCA 
         # Gower distances are projected to 2D with principal coordinates analysis.
         clust_obj <- list(cluster = clusters)
-        class(clust_obj) <- "kmeans"  # works with factoextra::fviz_cluster
+        class(clust_obj) <- "kmeans" 
         if (all(sapply(df, is.numeric))) {
           plot_data <- as.data.frame(scale(df, center = TRUE, scale = FALSE))
           plot_title <- "PCA Plot"

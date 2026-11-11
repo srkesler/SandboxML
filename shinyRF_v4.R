@@ -1,12 +1,10 @@
 # Shiny RF app
 make_rf_app <- function(){
 
-# Class balancing is passed to caret via trainControl(sampling = ...) so it is
-# applied only to the training portion of each fold, never to held-out data.
+# Class balancing is applied only to the training portion of each fold
 # Resamples the minority class with replacement, adding at most one extra copy
 # of it (doubling) and never more than is needed to reach the size of the
-# majority class. Setting the global environment keeps a saved model from
-# capturing this app's workspace.
+# majority class.
 upsample_minority <- function(x, y) {
   counts <- table(y)
   minority_idx <- which(y == names(which.min(counts)))
@@ -19,9 +17,7 @@ upsample_minority <- function(x, y) {
 environment(upsample_minority) <- globalenv()
 
 # Remove participant-level content from a trained caret model before it is saved
-# for download. Prediction needs only the fitted forest and the factor levels
-# stored in $xlevels. The formula's environment is reset because it otherwise
-# carries the whole workspace in which the model was trained (including the data).
+# for download.
 strip_participant_data <- function(model) {
   model$trainingData <- NULL
   model$pred <- NULL
@@ -33,12 +29,9 @@ strip_participant_data <- function(model) {
 }
 
 # ---- Performance metrics -------------------------------------------------
-# Both helpers take observed values and predictions that were NOT produced by
-# simply re-predicting the training rows (unless the caller labels them so).
 
 # Classification. The ROC direction is fixed (higher probability = Class1) so
-# that a model performing worse than chance is reported with AUC < 0.5 rather
-# than being silently flipped by pROC's automatic direction detection.
+# that a model performing worse than chance is reported with AUC < 0.5 
 class_metrics <- function(obs, pred, prob) {
   keep <- !is.na(pred) & !is.na(prob)
   obs <- obs[keep]; pred <- pred[keep]; prob <- prob[keep]
@@ -55,9 +48,7 @@ class_metrics <- function(obs, pred, prob) {
        roc = roc_obj)
 }
 
-# Regression. R squared is the proportion of outcome variance explained by the
-# predictions (1 - SSE/SST), which, unlike a squared correlation, is reduced by
-# systematic bias in the predictions.
+# Regression. 
 reg_metrics <- function(obs, pred) {
   keep <- !is.na(pred)
   obs <- obs[keep]; pred <- pred[keep]
@@ -89,11 +80,7 @@ print_reg_metrics <- function(m) {
 }
 
 # ---- Loading a saved model for prediction ---------------------------------
-# An uploaded model file is untrusted input. It is loaded into an isolated
-# environment (so nothing in it can replace functions used by the app), and only
-# plain data are taken from it: the fitted forest's numeric arrays, the factor
-# levels and the variable names. No function, formula or call stored in the file
-# is ever evaluated; predictions are made with this app's own code.
+
 is_plain_data <- function(x) {
   if (is.null(x)) return(TRUE)
   if (isS4(x)) return(FALSE)
@@ -131,10 +118,9 @@ read_rf_model <- function(path) {
 }
 
 # Returns the new data with predictions added. Rows that cannot be predicted
-# (missing values, or a category the model never saw) get NA predictions.
+# get NA predictions.
 predict_rf_model <- function(model, new_data) {
   new_data <- as.data.frame(new_data)
-  # Models are trained on syntactic column names (see rf_data); accept either form
   lookup <- new_data
   if (!all(model$vars %in% names(lookup))) {
     names(lookup) <- make.names(names(lookup), unique = TRUE)
