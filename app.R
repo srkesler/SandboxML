@@ -3,7 +3,7 @@
 
 options(shiny.maxRequestSize = 500 * 1024^2)  # 500 MB
 
-# Install any missing packages BEFORE loading them
+# Install any missing packages
 required_packages <- c(
   "shiny", "cluster", "factoextra", "dplyr", "shinyFiles", "ggplot2", "fs",
   "DT", "markdown", "naniar", "missRanger", "readr", "gridExtra", "rlang",
@@ -13,8 +13,7 @@ required_packages <- c(
 new_packages <- setdiff(required_packages, rownames(installed.packages()))
 if (length(new_packages)) install.packages(new_packages)
 
-# Packages are loaded with explicit library() calls (rather than in a loop) so
-# that deployment tools such as rsconnect can detect the app's dependencies.
+# Load libraries
 library(factoextra)
 library(shiny)
 library(cluster)
