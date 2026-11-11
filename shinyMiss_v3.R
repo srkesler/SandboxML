@@ -7,6 +7,7 @@ miss_ui <- tagList(
   sidebarLayout(
     sidebarPanel(
       helpText(tags$em("Data file should be cleaned.")),
+      helpText(tags$em("If the data will be used for predictive modeling, remove the outcome variable (and any cases missing the outcome) before imputing.")),
       fileInput("miss_datafile", "Upload CSV File", accept = ".csv"),
       
       tags$hr(),
@@ -78,45 +79,21 @@ miss_ui <- tagList(
 
 # Server
 miss_server <- function(input, output, session) {
-  df_imputed <- reactiveVal()
-  volumes <- c(Home = fs::path_home(), shinyFiles::getVolumes()())
-  shinyDirChoose(input, "miss_save_dir", roots = volumes, session = session)
-  shinyFileSave(input, "save_imputed", roots = volumes, session = session)
-  
-  rf_save_path <- reactive({
-    if (is.null(input$miss_save_dir)) return(NULL)
-    parseDirPath(volumes, input$miss_save_dir)
-  })
-  
   miss_data <- reactive({
     req(input$miss_datafile)
     read_csv(input$miss_datafile$datapath,show_col_types = FALSE)
   })
   
-  df_imputed <- reactiveVal(NULL)
-  df_clean <- reactiveVal(NULL)
-  
-  
-  
+  # Result of the most recent imputation. Everything in the Imputed Data tab is
+  # drawn from this object, so it always describes the imputation that was
+  # actually run, even if the sidebar options are changed afterwards.
+  imp_result <- reactiveVal(NULL)
+
   output$miss_dataView <- DT::renderDataTable({
     req(input$miss_datafile)
     df <- read.csv(input$miss_datafile$datapath)
     df
   })
-  
-  observeEvent(input$save_imputed, {
-    req(df_imputed())
-    
-    fileinfo <- parseSavePath(volumes, input$save_imputed)
-    if (nrow(fileinfo) > 0) {
-      filepath <- as.character(fileinfo$datapath)
-      if (!grepl("\\.csv$", filepath)) {
-        filepath <- paste0(filepath, ".csv")
-      }
-      write_csv(df_imputed(), filepath)
-    }
-  })
-  
   
   observeEvent(input$plot_miss, {
     
@@ -144,7 +121,9 @@ miss_server <- function(input, output, session) {
      # Check for missing data
      has_missing <- anyNA(df)
      validate(
-       need(has_missing, "Upset plot not valid. No missing data found.")
+       need(has_missing, "Upset plot not valid. No missing data found."),
+       need(sum(colSums(is.na(df)) > 0) >= 2,
+            "Upset plot requires at least two variables with missing data.")
      )
      # If missing values exist, show the plot
      gg_miss_upset(df)
@@ -173,59 +152,43 @@ miss_server <- function(input, output, session) {
   })
  
   
+  # Whole-number variables with few distinct values (e.g., Likert items) are
+  # treated as ordinal. A CSV file cannot mark a variable as ordinal, so this
+  # rule is how ordinal variables are recognized.
+  is_ordinal_like <- function(x) {
+    obs <- x[!is.na(x)]
+    is.numeric(x) && length(obs) > 0 && all(obs == round(obs)) && length(unique(obs)) <= 10
+  }
+
   impute_single_stat <- function(df) {
     df_imputed <- df  # preserve original
     
     for (col in names(df)) {
-      if (any(is.na(df[[col]]))) {
-        # Numeric, not ordered
-        if (is.numeric(df[[col]]) && !is.ordered(df[[col]])) {
-          df_imputed[[col]][is.na(df[[col]])] <- mean(df[[col]], na.rm = TRUE)
-
-          # Ordered factor (ordinal)
-        } else if (is.ordered(df[[col]])) {
-          ord_vals <- as.integer(df[[col]])
-          med_val <- median(ord_vals, na.rm = TRUE)
-          levels_ord <- levels(df[[col]])
-          df_imputed[[col]][is.na(df[[col]])] <- levels_ord[round(med_val)]
-
-          # Unordered categorical (binary or nominal factor/character)
-        } else if (is.factor(df[[col]]) || is.character(df[[col]])) {
-          mode_val <- names(which.max(table(df[[col]])))
-          df_imputed[[col]][is.na(df[[col]])] <- mode_val
-          if (is.factor(df_imputed[[col]])) df_imputed[[col]] <- droplevels(df_imputed[[col]])
+      x <- df[[col]]
+      miss <- is.na(x)
+      if (!any(miss) || all(miss)) next
+      
+      if (is.numeric(x)) {
+        # Ordinal: median (type = 1 always returns an observed category)
+        # Other numeric: mean
+        fill <- if (is_ordinal_like(x)) {
+          as.numeric(quantile(x, 0.5, type = 1, na.rm = TRUE))
+        } else {
+          mean(x, na.rm = TRUE)
         }
+        df_imputed[[col]][miss] <- fill
+        
+        # Categorical (binary or nominal factor/character/logical): mode
+      } else if (is.factor(x) || is.character(x) || is.logical(x)) {
+        mode_val <- names(which.max(table(x)))
+        if (is.logical(x)) mode_val <- as.logical(mode_val)
+        df_imputed[[col]][miss] <- mode_val
+        if (is.factor(df_imputed[[col]])) df_imputed[[col]] <- droplevels(df_imputed[[col]])
       }
     }
     
     return(df_imputed)
   }
-  
- # # Function for plots
- #  plot_imputed_observed <- function(df, df_imputed, miss_vars) {
- #    plots <- list()
- #    
- #    for (var in miss_vars) {
- #      # create a temporary dataframe with both imputed and observed info
- #      df_plot <- df %>%
- #        mutate(
- #          imputed = ifelse(is.na(.data[[var]]), "Imputed", "Observed"),
- #          value = coalesce(.data[[var]], df_imputed[[var]])
- #        )
- #      
- #      # Create and store the plot
- #      p <- ggplot(df_plot, aes(x = imputed, y = value, color = imputed)) +
- #        geom_point(position = position_jitter(width = 0.2, height = 0), alpha = 0.7, size = 1.5) +
- #        labs(title = var, x = NULL, y = NULL) +
- #        scale_color_manual(values = c("Imputed" = "#F8766D", "Observed" = "#00BFC4")) +
- #        scale_y_discrete() +
- #        theme_minimal()
- #      
- #      plots[[var]] <- p
- #    }
- #    
- #    return(plots)
- #  }
   
   plot_imputed_observed <- function(df, df_imputed, miss_vars) {
     plots <- list()
@@ -252,7 +215,6 @@ miss_server <- function(input, output, session) {
         geom_point(position = position_jitter(width = 0.2, height = 0), alpha = 0.7, size = 1.5) +
         labs(title = var, x = NULL, y = NULL) +
         scale_color_manual(values = c("Imputed" = "#F8766D", "Observed" = "#00BFC4")) +
-        scale_y_discrete() +
         theme_minimal()
       
       plots[[var]] <- p
@@ -264,8 +226,11 @@ miss_server <- function(input, output, session) {
   observeEvent(input$impute_miss, {
     
     df <- miss_data()
+    method <- input$miss_type
+    threshold <- as.numeric(input$miss_percent)
+    n_original <- nrow(df)
     
-    withProgress(message = "Imputing data", value = 0, {
+    imputed_result <- withProgress(message = "Imputing data", value = 0, {
       
       incProgress(0.5)
       
@@ -275,62 +240,82 @@ miss_server <- function(input, output, session) {
       df[, binary_vars] <- lapply(df[, binary_vars, drop = FALSE], as.factor)
       
       # Exclude high-missing variables if specified
-      threshold <- as.numeric(input$miss_percent)
-      percent_missing <- colSums(is.na(miss_data())) / nrow(miss_data()) * 100
-      if (threshold != 0) {
-         df <- df[, percent_missing <= threshold]
-      }
+      percent_missing <- colSums(is.na(df)) / nrow(df) * 100
+      excluded <- if (threshold != 0) names(df)[percent_missing > threshold] else character(0)
+      df <- df[, setdiff(names(df), excluded), drop = FALSE]
       
-      df_clean(df)
+      # pmm.k = 5 (predictive mean matching): each imputed value is drawn from
+      # observed values with similar predictions, so imputed values are realistic
+      # (e.g., whole numbers stay whole) and keep the spread of the observed data.
+      result <- tryCatch(
+        switch(method,
+               "Listwise Deletion" = df[complete.cases(df), ],
+               "Single Stat" = impute_single_stat(df),
+               "Random Forest Imputation" = missRanger(df, num.trees = 100, pmm.k = 5, verbose = 0, seed = 42)
+        ),
+        error = function(e) {
+          showNotification(paste("Imputation failed:", conditionMessage(e)), type = "error", duration = 10)
+          NULL
+        })
       
-     imputed_result <- switch(input$miss_type,
-                               "Listwise Deletion" = df[complete.cases(df), ],
-                               "Single Stat" = impute_single_stat(df),
-                               "Random Forest Imputation" = missRanger(df, num.trees = 100, verbose = 0, seed = 42)
-      )
-      
-      df_imputed(imputed_result)
-    
-    
       incProgress(1, detail = "Done!")
+      result
     })
     
-  #debug_df <<- imputed_result
+    req(imputed_result)
+    
+    imp_result(list(
+      method = method,
+      threshold = threshold,
+      excluded = excluded,
+      n_original = n_original,
+      df_clean = df,                # after exclusions, before imputation
+      df_imputed = imputed_result,
+      # variables that still contain missing values (entirely missing, or a type
+      # the method does not handle, such as dates)
+      not_imputed = if (method == "Listwise Deletion") character(0) else
+        names(imputed_result)[sapply(imputed_result, anyNA)]
+    ))
    
   }) # end observe impute 
   
   output$excluded_vars <- renderPrint({
-    req(miss_data())
+    res <- imp_result()
+    req(res)
     
-    percent_threshold <- suppressWarnings(as.numeric(input$miss_percent))
-    req(!is.na(percent_threshold))
-    
-    percent_missing <- colSums(is.na(miss_data())) / nrow(miss_data()) * 100
-    exc_vars <- names(percent_missing[percent_missing > percent_threshold])
-    
-    if (percent_threshold == 0) {
-      cat("No variables were excluded (0% threshold selected).")
-    } else if (length(exc_vars) > 0) {
-      cat("Excluded variables due to high missingness (> ", percent_threshold, "%):\n", 
-          paste(exc_vars, collapse = ", "))
+    if (res$threshold == 0) {
+      cat("No variables were excluded (no missingness threshold selected).")
+    } else if (length(res$excluded) > 0) {
+      cat("Excluded variables due to high missingness (> ", res$threshold, "%):\n", 
+          paste(res$excluded, collapse = ", "))
     } else {
-      cat("No variables exceeded the missingness threshold of", percent_threshold, "%.")
+      cat("No variables exceeded the missingness threshold of", res$threshold, "%.")
+    }
+    
+    if (res$method == "Listwise Deletion") {
+      cat("\n\nListwise deletion removed", res$n_original - nrow(res$df_imputed), "of",
+          res$n_original, "cases;", nrow(res$df_imputed), "complete cases remain.")
+    }
+    if (length(res$not_imputed) > 0) {
+      cat("\n\nNot imputed (entirely missing, or a variable type this method does not handle):\n",
+          paste(res$not_imputed, collapse = ", "))
     }
   })
   
   output$imputed_observed <- renderPlot({
-    req(df_imputed(),df_clean())
+    res <- imp_result()
+    req(res)
     
-    # Download handler
-    output$miss_download_imputed <- downloadHandler(
-      filename = function() "imputed_data.csv",
-      content = function(file) {
-        write_csv(df_imputed(), file)
-      }
-    )
+    # Listwise deletion removes cases; no values are imputed, so there is
+    # nothing to compare with the observed values.
+    if (res$method == "Listwise Deletion") {
+      plot.new()
+      text(0.5, 0.5, "Listwise deletion removes cases with missing data.\nNo values were imputed, so there is nothing to plot.", cex = 1.2)
+      return(invisible())
+    }
     
-    miss_vars <- names(df_clean())[sapply(df_clean(), function(x) any(is.na(x)))]
-    plots <- plot_imputed_observed(df_clean(), df_imputed(), miss_vars)
+    miss_vars <- names(res$df_clean)[sapply(res$df_clean, function(x) any(is.na(x)))]
+    plots <- plot_imputed_observed(res$df_clean, res$df_imputed, miss_vars)
     
     if (length(plots) == 0) {
       plot.new()
@@ -340,6 +325,15 @@ miss_server <- function(input, output, session) {
     }
     
   })
+  
+  # Download handler
+  output$miss_download_imputed <- downloadHandler(
+    filename = function() "imputed_data.csv",
+    content = function(file) {
+      req(imp_result())
+      write_csv(imp_result()$df_imputed, file)
+    }
+  )
     
     output$miss_codeOutput <- renderText({
       
@@ -352,6 +346,7 @@ miss_server <- function(input, output, session) {
                 "library(ggplot2)",
                 "library(dplyr)",
                 "library(tidyr)",
+                if (input$miss_type == "Random Forest Imputation") "library(missRanger)",
                 "",
                 "# Calculate percent missing per variable",
                 "missing_df <- df %>%",
@@ -368,6 +363,11 @@ miss_server <- function(input, output, session) {
                 "",
                 "# Plot relationships in missingness",
                 "gg_miss_upset(df)",
+                "",
+                "# Convert binary variables to factors",
+                "is_binary <- function(x) length(unique(na.omit(x))) == 2",
+                "binary_vars <- sapply(df, is_binary)",
+                "df[binary_vars] <- lapply(df[binary_vars], as.factor)",
                 ""
       )
       
@@ -375,7 +375,7 @@ miss_server <- function(input, output, session) {
         code <- c(code,
                   paste0("# Exclude variables with >", input$miss_percent, "% missingness",
                          "\npercent_missing <- colSums(is.na(df)) / nrow(df) * 100",
-                         "\ndf <- df[, percent_missing <= ", input$miss_percent, "]"),
+                         "\ndf <- df[, percent_missing <= ", input$miss_percent, ", drop = FALSE]"),
                   ""
         )
       }
@@ -386,23 +386,34 @@ miss_server <- function(input, output, session) {
                   "")
       } else if (input$miss_type == "Single Stat") {
         code <- c(code,
+                  "# Whole-number variables with 10 or fewer distinct values (e.g., Likert items)",
+                  "# are treated as ordinal",
+                  "is_ordinal_like <- function(x) {",
+                  "  obs <- x[!is.na(x)]",
+                  "  is.numeric(x) && length(obs) > 0 && all(obs == round(obs)) && length(unique(obs)) <= 10",
+                  "}",
+                  "",
                   "# Define single-stat imputation function",
                   "impute_single_stat <- function(df) {",
                   "  df_imputed <- df  # preserve original",
                   "  for (col in names(df)) {",
-                  "    if (any(is.na(df[[col]]))) {",
-                  "      if (is.numeric(df[[col]]) && !is.ordered(df[[col]])) {",
-                  "        df_imputed[[col]][is.na(df[[col]])] <- mean(df[[col]], na.rm = TRUE)",
-                  "      } else if (is.ordered(df[[col]])) {",
-                  "        ord_vals <- as.integer(df[[col]])",
-                  "        med_val <- median(ord_vals, na.rm = TRUE)",
-                  "        levels_ord <- levels(df[[col]])",
-                  "        df_imputed[[col]][is.na(df[[col]])] <- levels_ord[round(med_val)]",
-                  "      } else if (is.factor(df[[col]]) || is.character(df[[col]])) {",
-                  "        mode_val <- names(which.max(table(df[[col]])))",
-                  "        df_imputed[[col]][is.na(df[[col]])] <- mode_val",
-                  "        if (is.factor(df_imputed[[col]])) df_imputed[[col]] <- droplevels(df_imputed[[col]])",
+                  "    x <- df[[col]]",
+                  "    miss <- is.na(x)",
+                  "    if (!any(miss) || all(miss)) next",
+                  "    if (is.numeric(x)) {",
+                  "      # ordinal: median (type = 1 returns an observed category); other numeric: mean",
+                  "      fill <- if (is_ordinal_like(x)) {",
+                  "        as.numeric(quantile(x, 0.5, type = 1, na.rm = TRUE))",
+                  "      } else {",
+                  "        mean(x, na.rm = TRUE)",
                   "      }",
+                  "      df_imputed[[col]][miss] <- fill",
+                  "    } else if (is.factor(x) || is.character(x) || is.logical(x)) {",
+                  "      # categorical: mode",
+                  "      mode_val <- names(which.max(table(x)))",
+                  "      if (is.logical(x)) mode_val <- as.logical(mode_val)",
+                  "      df_imputed[[col]][miss] <- mode_val",
+                  "      if (is.factor(df_imputed[[col]])) df_imputed[[col]] <- droplevels(df_imputed[[col]])",
                   "    }",
                   "  }",
                   "",
@@ -415,12 +426,19 @@ miss_server <- function(input, output, session) {
         )
       } else {
         code <- c(code,
-                  "# Random forest imputation",
-                  "df_imputed <- missRanger(df, num.trees = 100, verbose = 0, seed = 42)",
+                  "# Random forest imputation with predictive mean matching (pmm.k = 5), which",
+                  "# draws each imputed value from observed values with similar predictions",
+                  "df_imputed <- missRanger(df, num.trees = 100, pmm.k = 5, verbose = 0, seed = 42)",
                   ""
         )
       }
       
+      if (input$miss_type == "Listwise Deletion") {
+        code <- c(code,
+                  "# Number of cases removed (no values are imputed with listwise deletion)",
+                  "nrow(df) - nrow(df_imputed)",
+                  "")
+      } else {
       code <- c(code,
                 "# Visualize observed vs. imputed values for one variable",
                 "var <- \"var_to_plot\"  # replace with variable of interest",
@@ -438,10 +456,11 @@ miss_server <- function(input, output, session) {
                 "  theme_minimal()",
                 ""
       )
+      }
       
       code <- c(code,
                 "# Save imputed file",
-                "write.csv(df_imputed, file = \"path_to_file.csv\")"
+                "write.csv(df_imputed, file = \"path_to_file.csv\", row.names = FALSE)"
       )
       
       paste(code, collapse = "\n")

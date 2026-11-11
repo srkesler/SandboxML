@@ -29,6 +29,8 @@ These are common algorithms that divide the data into *k* clusters with high wit
 - Numeric, skewed/outliers: k-medoids + Manhattan distance
 - Mixed (numeric + categorical): k-medoids + Gower’s distance
 
+K-means and k-medoids with Manhattan distance use numeric variables only; any non-numeric variables in the file are left out of the clustering (they are listed under the plots and are still included in the downloaded file). K-medoids with Gower’s distance uses all variables, treating text variables as categories.
+
 ---
 
 ### Reproducibility and Standardization
@@ -37,13 +39,13 @@ Clustering Analysis:
 
 - Runs each algorithm **25 times** to ensure stable results.
 - Sets a fixed seed: `set.seed(42)` for reproducibility.
-- Offers the option to **standardize** numeric variables to to mean = 0 and SD = 1. This prevents bias when variable scales differ substantially.
+- **Standardizes** continuous numeric variables to mean = 0 and SD = 1 by default. This prevents variables with large values from dominating the distance calculations when variable scales differ substantially. Uncheck this option only if your variables are already on comparable scales. (Gower’s distance rescales each variable itself, so this option does not change Gower results.)
 
 ---
 
 ### Determining the Number of Clusters
 
-You can specify `k` manually or use **silhouette width** to estimate the optimal number of clusters:
+You can specify `k` manually or use **silhouette width** to estimate the optimal number of clusters (k = 2 to 10 are compared, each fitted the same way as the final solution):
 
 - Silhouette width evaluates how well a point fits in its assigned cluster vs. others.
 - Higher average silhouette values (Si) indicate better clustering:
@@ -61,9 +63,10 @@ You can specify `k` manually or use **silhouette width** to estimate the optimal
 - Red dashed line = average Si
 
 #### PCA Scatterplot
-- Reduces multidimensional clusters to 2D (first 2 principal components)
+- Reduces multidimensional clusters to 2D (first 2 principal components) using the data as they were clustered (standardized or not)
+- When categorical variables are included (Gower’s distance), PCA cannot be used; the Gower distances are instead reduced to 2D with principal coordinates analysis (PCoA plot)
 - Points colored by cluster
-- Ellipses show 95% confidence region:
+- Ellipses show the region expected to contain about 95% of each cluster’s points (assuming a normal distribution):
   - Tight = low within-cluster variance
   - Overlapping = poor separation
 

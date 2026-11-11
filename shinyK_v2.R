@@ -32,7 +32,7 @@ make_clust_app <- function() {
           shiny::numericInput("clusters", "Number of Clusters (k):", value = 2, min = 2)
         ),
 
-        shiny::checkboxInput("scale_data", "Standardize the data?", FALSE),
+        shiny::checkboxInput("scale_data", "Standardize the data?", TRUE),
 
         shiny::actionButton("run", "Run Clustering"),
 
@@ -90,11 +90,12 @@ make_clust_app <- function() {
   # Server
   clust_server <- function(input, output, session) {
 
+    # All columns are read here. Which ones are used depends on the method:
+    # k-means and Manhattan k-medoids need numeric data, whereas Gower distance
+    # handles numeric and categorical variables together.
     clust_data <- shiny::reactive({
       shiny::req(input$clust_datafile)
-      df <- utils::read.csv(input$clust_datafile$datapath)
-      # Keep numeric columns only (as in original)
-      df[sapply(df, is.numeric)]
+      utils::read.csv(input$clust_datafile$datapath, stringsAsFactors = TRUE)
     })
 
     output$clust_dataView <- DT::renderDataTable({
@@ -107,14 +108,36 @@ make_clust_app <- function() {
 
       shiny::withProgress(message = "Clustering the data...", value = 0, {
 
-        df_raw <- clust_data()
+        df_all <- clust_data()
+        method <- input$method
+        k_mode <- input$k_mode
+
+        # Select the variables used for clustering
+        if (method == "K-medoids (Gower)") {
+          df_raw <- df_all
+          # TRUE/FALSE columns are treated as categories
+          for (v in names(df_raw)[sapply(df_raw, is.logical)]) df_raw[[v]] <- factor(df_raw[[v]])
+          dropped <- character(0)
+        } else {
+          numeric_cols <- sapply(df_all, is.numeric)
+          df_raw <- df_all[numeric_cols]
+          dropped <- names(df_all)[!numeric_cols]
+        }
+
         shiny::validate(shiny::need(nrow(df_raw) > 1, "Uploaded data must have at least 2 rows."))
-        shiny::validate(shiny::need(ncol(df_raw) > 0, "Uploaded data must have at least 1 numeric column."))
+        shiny::validate(shiny::need(
+          ncol(df_raw) > 0,
+          "Uploaded data must have at least 1 numeric column (or choose K-medoids (Gower) for categorical data)."
+        ))
+        shiny::validate(shiny::need(
+          !anyNA(df_raw),
+          "The data contain missing values. Remove or impute them (see the Missing Data tab) before clustering."
+        ))
 
         # Detect variable types
         is_binary <- function(x) is.numeric(x) && all(x %in% c(0, 1)) && length(unique(x)) == 2
         binary_vars <- sapply(df_raw, is_binary)
-        continuous_vars <- !binary_vars
+        continuous_vars <- sapply(df_raw, is.numeric) & !binary_vars
 
         # Conditional scaling (scale continuous variables only)
         df <- if (isTRUE(input$scale_data)) {
@@ -129,9 +152,6 @@ make_clust_app <- function() {
 
         shiny::incProgress(0.2)
 
-        method <- input$method
-        k_mode <- input$k_mode
-
         # Compute distance matrix only for PAM-based methods
         dist_mat <- if (method == "K-means (Euclidean)") {
           NULL
@@ -143,20 +163,28 @@ make_clust_app <- function() {
 
         shiny::incProgress(0.3)
 
-        # Determine optimal k if selected
+        # Determine optimal k if selected. Each candidate k is fitted exactly as
+        # the final model is (same number of random starts), so the silhouette
+        # used to choose k describes the kind of solution that is reported.
         if (k_mode == "Auto") {
-          sil_width <- rep(NA_real_, 10)
+          # k cannot exceed the number of distinct rows minus 1
+          k_max <- min(10, nrow(unique(df)) - 1)
+          shiny::validate(shiny::need(
+            k_max >= 2,
+            "Not enough distinct rows to choose the number of clusters automatically."
+          ))
+          sil_width <- rep(NA_real_, k_max)
 
           if (method == "K-means (Euclidean)") {
-            for (i in 2:10) {
+            for (i in 2:k_max) {
               fit <- stats::kmeans(df, centers = i, nstart = 25)
               sil <- cluster::silhouette(fit$cluster, stats::dist(df))
               sil_width[i] <- mean(sil[, 3])
             }
             k <- which.max(sil_width)
           } else {
-            for (i in 2:10) {
-              fit <- cluster::pam(dist_mat, k = i, diss = TRUE)
+            for (i in 2:k_max) {
+              fit <- cluster::pam(dist_mat, k = i, diss = TRUE, medoids = "random", nstart = 25, pamonce = 3)
               sil_width[i] <- fit$silinfo$avg.width
             }
             k <- which.max(sil_width)
@@ -176,7 +204,8 @@ make_clust_app <- function() {
           clusters <- clust_model$cluster
           sil <- cluster::silhouette(clusters, stats::dist(df))
         } else {
-          clust_model <- cluster::pam(dist_mat, k = k, diss = TRUE, medoids = "random", nstart = 25)
+          # pamonce = 3 is a faster implementation that gives the same result
+          clust_model <- cluster::pam(dist_mat, k = k, diss = TRUE, medoids = "random", nstart = 25, pamonce = 3)
           clusters <- clust_model$clustering
           sil <- cluster::silhouette(clusters, dist_mat)
         }
@@ -184,19 +213,37 @@ make_clust_app <- function() {
         mean_sil <- mean(sil[, 3])
 
         # Visualization
+        # Numeric data: PCA of the data exactly as they were clustered (centered,
+        # and standardized only if that option was selected; stand = FALSE stops
+        # fviz_cluster from standardizing a second time).
+        # Data with categorical variables (Gower): PCA cannot be used, so the
+        # Gower distances are projected to 2D with principal coordinates analysis.
         clust_obj <- list(cluster = clusters)
         class(clust_obj) <- "kmeans"  # works with factoextra::fviz_cluster
-        pca_plot <- factoextra::fviz_cluster(
-          clust_obj,
-          data = df,
-          geom = "point",
-          ellipse.type = "norm",
-          ggtheme = ggplot2::theme_minimal(),
-          main = "PCA Plot"
-        )
+        if (all(sapply(df, is.numeric))) {
+          plot_data <- as.data.frame(scale(df, center = TRUE, scale = FALSE))
+          plot_title <- "PCA Plot"
+        } else {
+          plot_data <- as.data.frame(stats::cmdscale(dist_mat, k = 2))
+          names(plot_data) <- paste0("Dim", seq_len(ncol(plot_data)))
+          plot_title <- "PCoA Plot (Gower distance)"
+        }
+        pca_plot <- if (ncol(plot_data) >= 2) {
+          factoextra::fviz_cluster(
+            clust_obj,
+            data = plot_data,
+            stand = FALSE,
+            geom = "point",
+            ellipse.type = "norm",
+            ggtheme = ggplot2::theme_minimal(),
+            main = plot_title
+          )
+        } else {
+          NULL  # a 2D plot needs at least 2 variables
+        }
 
-        # Output dataset (raw, unstandardized + cluster assignment)
-        df_out <- df_raw
+        # Output dataset (all original columns, unstandardized + cluster assignment)
+        df_out <- df_all
         df_out$cluster <- clusters
 
         shiny::incProgress(1, detail = "Done!")
@@ -209,6 +256,7 @@ make_clust_app <- function() {
           df_out = df_out,
           k = k,
           method = method,
+          dropped = dropped,
           scaled = isTRUE(input$scale_data)
         )
       })
@@ -222,11 +270,21 @@ make_clust_app <- function() {
 
     output$silMean <- shiny::renderPrint({
       shiny::req(clustering_result())
-      cat("Mean Silhouette Width:", round(clustering_result()$mean_sil, 3))
+      res <- clustering_result()
+      cat("Number of clusters (k):", res$k, "\n")
+      cat("Mean Silhouette Width:", round(res$mean_sil, 3))
+      if (length(res$dropped) > 0) {
+        cat("\n\nNot used for clustering (non-numeric):", paste(res$dropped, collapse = ", "),
+            "\nChoose K-medoids (Gower) to include categorical variables.")
+      }
     })
 
     output$pcaPlot <- shiny::renderPlot({
       shiny::req(clustering_result())
+      shiny::validate(shiny::need(
+        !is.null(clustering_result()$pca_plot),
+        "The 2D cluster plot requires at least 2 variables."
+      ))
       print(clustering_result()$pca_plot)
     })
 
@@ -265,12 +323,19 @@ make_clust_app <- function() {
         "library(dplyr)",
         "library(tidyr)",
         "",
-        "df_raw <- read.csv(\"path_to_your_file.csv\")  # load data",
+        if (method == "K-medoids (Gower)") {
+          c("# load data (text columns become categorical factors, which Gower distance handles)",
+            "df_all <- read.csv(\"path_to_your_file.csv\", stringsAsFactors = TRUE)",
+            "df_raw <- df_all")
+        } else {
+          c("df_all <- read.csv(\"path_to_your_file.csv\")  # load data",
+            "df_raw <- df_all[sapply(df_all, is.numeric)]  # this method needs numeric variables")
+        },
         "",
         "# detect variable type",
         "is_binary <- function(x) is.numeric(x) && all(x %in% c(0, 1)) && length(unique(x)) == 2",
         "binary_vars <- sapply(df_raw, is_binary)",
-        "continuous_vars <- !binary_vars",
+        "continuous_vars <- sapply(df_raw, is.numeric) & !binary_vars",
         ""
       )
 
@@ -310,8 +375,9 @@ make_clust_app <- function() {
           code_lines <- c(
             code_lines,
             "# determine optimal number of clusters using k-means",
-            "sil_width <- rep(NA, 10)",
-            "for (i in 2:10) {",
+            "k_max <- min(10, nrow(unique(df)) - 1)  # k must be less than the number of distinct rows",
+            "sil_width <- rep(NA, k_max)",
+            "for (i in 2:k_max) {",
             "  fit <- kmeans(df, centers = i, nstart = 25)",
             "  sil <- silhouette(fit$cluster, dist(df))",
             "  sil_width[i] <- mean(sil[, 3])",
@@ -322,9 +388,11 @@ make_clust_app <- function() {
           code_lines <- c(
             code_lines,
             "# determine optimal number of clusters using PAM",
-            "sil_width <- rep(NA, 10)",
-            "for (i in 2:10) {",
-            "  fit <- pam(dist_mat, k = i, diss = TRUE)",
+            "# (pamonce = 3 is a faster implementation that gives the same result)",
+            "k_max <- min(10, nrow(unique(df)) - 1)  # k must be less than the number of distinct rows",
+            "sil_width <- rep(NA, k_max)",
+            "for (i in 2:k_max) {",
+            "  fit <- pam(dist_mat, k = i, diss = TRUE, medoids = 'random', nstart = 25, pamonce = 3)",
             "  sil_width[i] <- fit$silinfo$avg.width",
             "}",
             "k <- which.max(sil_width)"
@@ -348,7 +416,7 @@ make_clust_app <- function() {
           code_lines,
           "",
           "# PAM clustering",
-          "clust_model <- pam(dist_mat, k = k, diss = TRUE, medoids = 'random', nstart = 25)",
+          "clust_model <- pam(dist_mat, k = k, diss = TRUE, medoids = 'random', nstart = 25, pamonce = 3)",
           "clusters <- clust_model$clustering",
           "sil <- silhouette(clusters, dist_mat)"
         )
@@ -361,7 +429,7 @@ make_clust_app <- function() {
         "fviz_silhouette(sil)",
         "",
         "# Save data with clusters",
-        "df_out <- df_raw",
+        "df_out <- df_all",
         "df_out$cluster <- clusters",
         "write.csv(df_out, file = 'clustered_data.csv', row.names = FALSE)"
       )

@@ -3,6 +3,18 @@
 
 options(shiny.maxRequestSize = 500 * 1024^2)  # 500 MB
 
+# Install any missing packages BEFORE loading them
+required_packages <- c(
+  "shiny", "cluster", "factoextra", "dplyr", "shinyFiles", "ggplot2", "fs",
+  "DT", "markdown", "naniar", "missRanger", "readr", "gridExtra", "rlang",
+  "randomForest", "caret", "pROC", "shinyjs", "tidyr"
+)
+
+new_packages <- setdiff(required_packages, rownames(installed.packages()))
+if (length(new_packages)) install.packages(new_packages)
+
+# Packages are loaded with explicit library() calls (rather than in a loop) so
+# that deployment tools such as rsconnect can detect the app's dependencies.
 library(factoextra)
 library(shiny)
 library(cluster)
@@ -21,20 +33,7 @@ library(randomForest)
 library(caret)
 library(pROC)
 library(shinyjs)
-library(dplyr)
 library(tidyr)
-
-# Install and load required packages
-required_packages <- c(
-"shiny", "cluster", "factoextra", "dplyr", "shinyFiles", "ggplot2", "fs",
-   "DT", "markdown", "naniar", "missRanger", "readr", "gridExtra", "rlang",
-   "randomForest", "caret", "pROC", "shinyjs"
- )
-
- new_packages <- required_packages[!(required_packages %in% installed.packages()[, "Package"])]
- if (length(new_packages)) install.packages(new_packages)
-
- invisible(lapply(required_packages, library, character.only = TRUE))
 
 source("shinyMiss_v3.R")
 source("shinyK_v2.R")
