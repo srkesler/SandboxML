@@ -621,7 +621,7 @@ output$rf_download_pred <- downloadHandler(
       "",
       "library(randomForest)",
       "library(caret)",
-      "library(pROC)",
+      if (is_class) "library(pROC)",
       "",
       "df <- read.csv(\"path_to_your_file.csv\")",
       sprintf("outcome <- \"%s\"", input$rf_outcome),
@@ -670,11 +670,11 @@ output$rf_download_pred <- downloadHandler(
     sampling_arg <- switch(balance, Upsample = "upsample_minority", Downsample = "\"down\"", NULL)
 
     if (input$cv_method == "None") {
-      cv <- "none"
+      cv_comment <- "# No cross-validation: one model is trained on all of the data"
     } else if (input$cv_method == "LOOCV") {
-      cv <- "LOOCV"
+      cv_comment <- "# Set up leave-one-out cross-validation (LOOCV)"
     } else {
-      cv <- paste0("cv (k = ", input$k_folds, ")")
+      cv_comment <- sprintf("# Set up %s-fold cross-validation", input$k_folds)
     }
 
     class_probs <- if (is_class) "TRUE" else "FALSE"
@@ -689,7 +689,7 @@ output$rf_download_pred <- downloadHandler(
     ctrl_line <- sprintf("ctrl <- trainControl(%s)", paste(ctrl_args, collapse = ", "))
 
     code <- c(code,
-              sprintf("# Set up cross-validation (%s)", cv),
+              cv_comment,
               if (!is.null(sampling_arg)) "# sampling = class balancing, applied to training data only",
               ctrl_line,
               "")
@@ -718,7 +718,6 @@ output$rf_download_pred <- downloadHandler(
 
     code <- c(code,
               "# Train Random Forest",
-              "",
               "model <- train(form, data = df, method = \"rf\",",
               "               trControl = ctrl,",
               "               tuneGrid = data.frame(mtry = mtry),",
@@ -726,8 +725,12 @@ output$rf_download_pred <- downloadHandler(
               "")
 
     # Performance code, mirroring what the Results tab reports
-    class_perf <- function(pred, prob) {
-      c(sprintf("confusionMatrix(%s, obs, positive = \"Class1\")", pred),
+    class_perf <- function(pred, prob, f1 = TRUE) {
+      c(if (f1) {
+          sprintf("confusionMatrix(%s, obs, positive = \"Class1\", mode = \"everything\")  # includes F1", pred)
+        } else {
+          sprintf("confusionMatrix(%s, obs, positive = \"Class1\")", pred)
+        },
         "# levels and direction are fixed so an AUC below 0.5 is reported as such",
         sprintf("roc_obj <- roc(obs, %s, levels = c(\"Class0\", \"Class1\"), direction = \"<\")", prob),
         "auc(roc_obj)")
@@ -745,11 +748,13 @@ output$rf_download_pred <- downloadHandler(
                 "preds <- model$pred$pred",
                 if (is_class) {
                   c("probs <- model$pred$Class1  # predicted probability of the positive class",
-                    class_perf("preds", "probs"),
+                    # the Results tab does not report F1 for LOOCV
+                    class_perf("preds", "probs", f1 = input$cv_method != "LOOCV"),
                     "plot(roc_obj, main = \"ROC\")")
                 } else {
                   c(reg_perf("preds"),
-                    "plot(obs, preds, xlab = \"Actual\", ylab = \"Predicted\", main = \"Actual vs Predicted\")")
+                    "plot(obs, preds, xlab = \"Actual\", ylab = \"Predicted\", main = \"Actual vs Predicted\")",
+                    "abline(lm(preds ~ obs), col = \"red\", lwd = 2)  # line of best fit")
                 })
     } else {
       code <- c(code, "obs <- model$trainingData$.outcome", "")
@@ -764,7 +769,8 @@ output$rf_download_pred <- downloadHandler(
                       "plot(roc_obj, main = \"ROC\")")
                   } else {
                     c(reg_perf("oob_preds"),
-                      "plot(obs, oob_preds, xlab = \"Actual\", ylab = \"Predicted\", main = \"Actual vs Predicted\")")
+                      "plot(obs, oob_preds, xlab = \"Actual\", ylab = \"Predicted\", main = \"Actual vs Predicted\")",
+                      "abline(lm(oob_preds ~ obs), col = \"red\", lwd = 2)  # line of best fit")
                   },
                   "")
       } else {

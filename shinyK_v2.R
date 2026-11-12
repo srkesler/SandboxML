@@ -313,13 +313,15 @@ make_clust_app <- function() {
         "library(cluster)",
         "library(factoextra)",
         "library(ggplot2)",
-        "library(dplyr)",
-        "library(tidyr)",
         "",
         if (method == "K-medoids (Gower)") {
           c("# load data (text columns become categorical factors, which Gower distance handles)",
             "df_all <- read.csv(\"path_to_your_file.csv\", stringsAsFactors = TRUE)",
-            "df_raw <- df_all")
+            "df_raw <- df_all",
+            "",
+            "# TRUE/FALSE columns are treated as categories",
+            "logical_vars <- sapply(df_raw, is.logical)",
+            "df_raw[logical_vars] <- lapply(df_raw[logical_vars], factor)")
         } else {
           c("df_all <- read.csv(\"path_to_your_file.csv\")  # load data",
             "df_raw <- df_all[sapply(df_all, is.numeric)]  # this method needs numeric variables")
@@ -335,7 +337,6 @@ make_clust_app <- function() {
       if (isTRUE(scale_on)) {
         code_lines <- c(
           code_lines,
-          "",
           "# scale continuous variables only",
           "df_scaled <- df_raw",
           "df_scaled[, continuous_vars] <- scale(df_raw[, continuous_vars])",
@@ -418,8 +419,27 @@ make_clust_app <- function() {
       code_lines <- c(
         code_lines,
         "",
-        "# Plot Cluster Result",
+        "# Silhouette plot",
         "fviz_silhouette(sil)",
+        "",
+        if (method == "K-medoids (Gower)") {
+          c("# 2D cluster plot (requires at least 2 variables): PCA if every variable is",
+            "# numeric, otherwise principal coordinates analysis (PCoA) of the Gower distances",
+            "if (all(sapply(df, is.numeric))) {",
+            "  plot_data <- as.data.frame(scale(df, center = TRUE, scale = FALSE))",
+            "  plot_title <- \"PCA Plot\"",
+            "} else {",
+            "  plot_data <- as.data.frame(cmdscale(dist_mat, k = 2))",
+            "  names(plot_data) <- paste0(\"Dim\", seq_len(ncol(plot_data)))",
+            "  plot_title <- \"PCoA Plot (Gower distance)\"",
+            "}")
+        } else {
+          c("# PCA plot of the clusters (requires at least 2 variables)",
+            "plot_data <- as.data.frame(scale(df, center = TRUE, scale = FALSE))",
+            "plot_title <- \"PCA Plot\"")
+        },
+        "fviz_cluster(list(data = plot_data, cluster = clusters), stand = FALSE, geom = \"point\",",
+        "             ellipse.type = \"norm\", ggtheme = theme_minimal(), main = plot_title)",
         "",
         "# Save data with clusters",
         "df_out <- df_all",
